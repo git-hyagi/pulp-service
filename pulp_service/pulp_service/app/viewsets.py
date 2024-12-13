@@ -22,6 +22,11 @@ from pulp_service.app.authentication import (
     RHEntitlementCertAuthentication,
 )
 
+from drf_spectacular.utils import extend_schema
+from pulpcore.app.models import Artifact
+from django.db.models import Sum
+from gettext import gettext as _
+
 _logger = logging.getLogger(__name__)
 
 
@@ -115,3 +120,91 @@ class DebugAuthenticationHeadersView(APIView):
 
         json_header_value = json.loads(header_decoded_content)
         return Response(data=json_header_value)
+
+
+def _domain_storage_usage(domain_name=None):
+    if domain_name:
+        return (
+            Artifact.objects.filter(pulp_domain__name=domain_name)
+            .aggregate(Sum("size",default=0))
+        )
+
+    return Artifact.objects.values("pulp_domain__name").annotate(
+        total_size=Sum("size", default=0)
+    )
+
+
+class PerDomainStorageUsage(APIView):
+    """
+    Returns storage usage information for an specific domain
+    """
+
+    # [TODO] allow anyone to access the endpoint??
+    authentication_classes = []
+    permission_classes = []
+
+    @extend_schema(
+        summary="Retrieve the storage usage of an specific domain",
+        operation_id="domain_storage_usage_read",
+        responses={200: None},
+    )
+    def get(self, request):
+        if not request.data.get('pulp_domain_name',None):
+            return Response(None,status=400)
+
+        domain_name = request.data['pulp_domain_name']
+        space_usage_per_domain = _domain_storage_usage(domain_name)
+        #if not space_usage_per_domain:
+        #    return Response(None, status=404)
+
+        # serialized_data = [DomainStorageSerializer]
+        # context = {"request": request}
+        # data = {}
+        # for domain in space_usage_per_domain:
+        #    data = {
+        #        "name": domain["pulp_domain__name"],
+        #        "storage_used": domain["total_size"],
+        #    }
+        #    _logger.info(
+        #        _("Storage usage by %s domain: %d", data["name"] , data["storage_used"])
+        #    )
+        #    serialized_data.append(DomainStorageSerializer(data=data,context=context))
+
+        _logger.info(
+            "Storage usage by %s domain: %d", domain_name, space_usage_per_domain["size__sum"]
+        )
+
+        response = Response()
+        response["X-Pulp-Domain-Name"] = domain_name
+        response["X-Pulp-Domain-Storage-Usage"] = space_usage_per_domain["size__sum"]
+        return response
+
+class AllDomainsStorageUsage(APIView):
+    """
+    Returns storage usage information from all domains
+    """
+
+    # [TODO] allow anyone to access the endpoint??
+    authentication_classes = []
+    permission_classes = []
+
+    @extend_schema(
+        summary="Retrieve the storage usage from all domains",
+        operation_id="all_domains_storage_usage_read",
+        responses={200: None},
+    )
+    def get(self, request):
+        space_usage_per_domain = _domain_storage_usage()
+        if not space_usage_per_domain:
+            return Response(None, status=404)
+
+        response = Response()
+        count = 1
+        for domain in space_usage_per_domain:
+            domain_name = domain["pulp_domain__name"]
+            storage_used= domain["total_size"]
+            _logger.info("Storage usage by %s domain: %d", domain_name , storage_used)
+            response["X-Pulp-Domain-Name-"+str(count)] = domain_name
+            response["X-Pulp-Domain-Storage-Usage-"+str(count)] = storage_used
+            count+=1
+        return response
