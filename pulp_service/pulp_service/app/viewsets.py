@@ -5,13 +5,16 @@ from base64 import b64decode
 from binascii import Error as Base64DecodeError
 
 from django.conf import settings
+from django.db.models import Sum
 from django.shortcuts import redirect
+from drf_spectacular.utils import extend_schema
 
 from rest_framework import status
 from rest_framework.exceptions import APIException
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from pulpcore.app.models import Artifact
 from pulpcore.app.viewsets import RolesMixin
 from pulpcore.app.viewsets import ContentGuardViewSet, RolesMixin
 
@@ -22,10 +25,6 @@ from pulp_service.app.authentication import (
     RHEntitlementCertAuthentication,
 )
 
-from drf_spectacular.utils import extend_schema
-from pulpcore.app.models import Artifact
-from django.db.models import Sum
-from gettext import gettext as _
 
 _logger = logging.getLogger(__name__)
 
@@ -149,18 +148,33 @@ class PerDomainStorageUsage(APIView):
         operation_id="domain_storage_usage_read",
         responses={200: None},
     )
-    def get(self, request):
-        if not request.data.get("pulp_domain_name", None):
-            return Response(None, status=400)
+    def head(self, request, domain=None):
+        if domain:
+            return self._single_domain_storage_usage(domain.rstrip("/"))
+        return self._all_domains_storage_usage()
 
-        domain_name = request.data["pulp_domain_name"]
+    def _single_domain_storage_usage(self, domain_name):
         domain_space_usage = _domain_storage_usage(domain_name)
-
         _logger.info("Storage usage by %s domain: %d", domain_name, domain_space_usage)
-
         response = Response()
         response["X-Pulp-Domain-Name"] = domain_name
         response["X-Pulp-Domain-Storage-Usage"] = domain_space_usage
+        return response
+
+    def _all_domains_storage_usage(self):
+        space_usage_per_domain = _domain_storage_usage()
+        if not space_usage_per_domain:
+            return Response(None, status=404)
+
+        response = Response()
+        count = 1
+        for domain in space_usage_per_domain:
+            domain_name = domain["pulp_domain__name"]
+            storage_used = domain["total_size"]
+            _logger.info("Storage usage by %s domain: %d", domain_name, storage_used)
+            response["X-Pulp-Domain-Name-" + str(count)] = domain_name
+            response["X-Pulp-Domain-Storage-Usage-" + str(count)] = storage_used
+            count += 1
         return response
 
 
@@ -178,7 +192,7 @@ class AllDomainsStorageUsage(APIView):
         operation_id="all_domains_storage_usage_read",
         responses={200: None},
     )
-    def get(self, request):
+    def head(self, request):
         space_usage_per_domain = _domain_storage_usage()
         if not space_usage_per_domain:
             return Response(None, status=404)
