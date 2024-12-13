@@ -123,20 +123,21 @@ class DebugAuthenticationHeadersView(APIView):
 
 
 def _domain_storage_usage(domain_name=None):
+    """
+    Returns the sum of the size of all artifacts from a specific domain if domain_name is provided,
+    else, for each available domain, returns the sum of the size of all artifacts.
+    """
     if domain_name:
-        return (
-            Artifact.objects.filter(pulp_domain__name=domain_name)
-            .aggregate(Sum("size",default=0))
-        )
+        return Artifact.objects.filter(pulp_domain__name=domain_name).aggregate(
+            Sum("size", default=0)
+        )["size__sum"]
 
-    return Artifact.objects.values("pulp_domain__name").annotate(
-        total_size=Sum("size", default=0)
-    )
+    return Artifact.objects.values("pulp_domain__name").annotate(total_size=Sum("size", default=0))
 
 
 class PerDomainStorageUsage(APIView):
     """
-    Returns storage usage information for an specific domain
+    Returns the storage usage, in bytes, of an specific domain
     """
 
     # [TODO] allow anyone to access the endpoint??
@@ -144,44 +145,28 @@ class PerDomainStorageUsage(APIView):
     permission_classes = []
 
     @extend_schema(
-        summary="Retrieve the storage usage of an specific domain",
+        summary="Retrieve the storage usage in bytes of an specific domain",
         operation_id="domain_storage_usage_read",
         responses={200: None},
     )
     def get(self, request):
-        if not request.data.get('pulp_domain_name',None):
-            return Response(None,status=400)
+        if not request.data.get("pulp_domain_name", None):
+            return Response(None, status=400)
 
-        domain_name = request.data['pulp_domain_name']
-        space_usage_per_domain = _domain_storage_usage(domain_name)
-        #if not space_usage_per_domain:
-        #    return Response(None, status=404)
+        domain_name = request.data["pulp_domain_name"]
+        domain_space_usage = _domain_storage_usage(domain_name)
 
-        # serialized_data = [DomainStorageSerializer]
-        # context = {"request": request}
-        # data = {}
-        # for domain in space_usage_per_domain:
-        #    data = {
-        #        "name": domain["pulp_domain__name"],
-        #        "storage_used": domain["total_size"],
-        #    }
-        #    _logger.info(
-        #        _("Storage usage by %s domain: %d", data["name"] , data["storage_used"])
-        #    )
-        #    serialized_data.append(DomainStorageSerializer(data=data,context=context))
-
-        _logger.info(
-            "Storage usage by %s domain: %d", domain_name, space_usage_per_domain["size__sum"]
-        )
+        _logger.info("Storage usage by %s domain: %d", domain_name, domain_space_usage)
 
         response = Response()
         response["X-Pulp-Domain-Name"] = domain_name
-        response["X-Pulp-Domain-Storage-Usage"] = space_usage_per_domain["size__sum"]
+        response["X-Pulp-Domain-Storage-Usage"] = domain_space_usage
         return response
+
 
 class AllDomainsStorageUsage(APIView):
     """
-    Returns storage usage information from all domains
+    Returns storage usage, in bytes, from all domains
     """
 
     # [TODO] allow anyone to access the endpoint??
@@ -189,7 +174,7 @@ class AllDomainsStorageUsage(APIView):
     permission_classes = []
 
     @extend_schema(
-        summary="Retrieve the storage usage from all domains",
+        summary="Retrieve the storage usage in bytes from all domains",
         operation_id="all_domains_storage_usage_read",
         responses={200: None},
     )
@@ -202,9 +187,9 @@ class AllDomainsStorageUsage(APIView):
         count = 1
         for domain in space_usage_per_domain:
             domain_name = domain["pulp_domain__name"]
-            storage_used= domain["total_size"]
-            _logger.info("Storage usage by %s domain: %d", domain_name , storage_used)
-            response["X-Pulp-Domain-Name-"+str(count)] = domain_name
-            response["X-Pulp-Domain-Storage-Usage-"+str(count)] = storage_used
-            count+=1
+            storage_used = domain["total_size"]
+            _logger.info("Storage usage by %s domain: %d", domain_name, storage_used)
+            response["X-Pulp-Domain-Name-" + str(count)] = domain_name
+            response["X-Pulp-Domain-Storage-Usage-" + str(count)] = storage_used
+            count += 1
         return response

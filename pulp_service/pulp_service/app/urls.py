@@ -1,7 +1,14 @@
 from django.urls import path
 
 from .admin import admin_site
-from .viewsets import RedirectCheck, InternalServerErrorCheck, InternalServerErrorCheckWithException, DebugAuthenticationHeadersView,PerDomainStorageUsage,AllDomainsStorageUsage
+from .viewsets import (
+    RedirectCheck,
+    InternalServerErrorCheck,
+    InternalServerErrorCheckWithException,
+    DebugAuthenticationHeadersView,
+    PerDomainStorageUsage,
+    AllDomainsStorageUsage,
+)
 
 
 urlpatterns = [
