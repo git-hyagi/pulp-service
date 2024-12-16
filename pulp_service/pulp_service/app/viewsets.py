@@ -126,12 +126,44 @@ def _domain_storage_usage(domain_name=None):
     Returns the sum of the size of all artifacts from a specific domain if domain_name is provided,
     else, for each available domain, returns the sum of the size of all artifacts.
     """
+    artifacts = Artifact.objects.values("pulp_domain__name")
     if domain_name:
-        return Artifact.objects.filter(pulp_domain__name=domain_name).aggregate(
-            Sum("size", default=0)
-        )["size__sum"]
+        artifacts = artifacts.filter(pulp_domain__name=domain_name)
+    return artifacts.annotate(total_size=Sum("size"))
 
-    return Artifact.objects.values("pulp_domain__name").annotate(total_size=Sum("size", default=0))
+
+class DomainStorageUsage(APIView):
+    """
+    Returns the storage usage, in bytes, of an specific domain
+    """
+
+    authentication_classes = []
+    permission_classes = []
+
+    @extend_schema(
+        summary="Retrieve the storage usage in bytes of an specific domain",
+        operation_id="domain_storage_usage_read",
+        responses={200: None},
+    )
+    def head(self, request, domain=None):
+        return self._storage_usage(domain)
+
+    def _storage_usage(self, domain_name=None):
+        space_usage_per_domain = _domain_storage_usage(domain_name)
+        if not space_usage_per_domain:
+            return Response(None, status=404)
+
+        response = Response()
+        count = 1
+        for domain in space_usage_per_domain:
+            domain_name = domain["pulp_domain__name"]
+            storage_used = domain["total_size"]
+            _logger.info("Storage usage by %s domain: %d", domain_name, storage_used)
+            count_suffix = f"-{count}" if len(space_usage_per_domain) > 1 else ""
+            response[f"X-Pulp-Domain-Name{count_suffix}"] = domain_name
+            response[f"X-Pulp-Domain-Storage-Usage{count_suffix}"] = storage_used
+            count += 1
+        return response
 
 
 class PerDomainStorageUsage(APIView):
