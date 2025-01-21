@@ -78,90 +78,89 @@ output_file = args.output
 graph_file = args.graph_file
 
 
-# running task, 3 situations:
-# - started and didn't finish yet (finished_at=null)
-# - started and finished in between the current bucket interval
-# - started and not finished in between the current bucket interval
+# running task, 6 situations:
+# 1- started and didn't finish yet (finished_at=null)
+# 2- started before the current bucket interval and didn't finish yet (finished_at=null)
+# 3- started and finished in between the current bucket interval
+# 4- started and not finished in between the current bucket interval
+# 5- started before the current bucket interval and finished in between the current bucket interval
+# 6- started before the current bucket interval and not finished in between the current bucket interval
 
-# - started and didn't finish yet (finished_at=null)
-def running_task(query_date_time, data):
-    url = base_addr + TASKS_ENDPOINT + "state=running&started_at__gte="+query_date_time.strftime(DATETIME_FORMAT)
+# waiting unblocked:
+# 1- unblocked_at is inside of bucket, but started_at not (meaning, the task is waiting)
+
+# 1- started and didn't finish yet (finished_at=null)
+def started_and_didnt_finish_yet(start_bucket_interval, end_bucket_interval):
+    url = base_addr + TASKS_ENDPOINT + "started_at__range=" + start_bucket_interval +","+ end_bucket_interval + "&finished_at__isnull="+str(True)
     response = requests.get(url,auth=(username,password))
+    check_response(response)
+    return json.loads(response.text)
 
-    if response.status_code // 100 != 2:
-        print("ERROR:", response.status_code, response.text)
-        sys.exit(1)
+# 2- started before the current bucket interval and didn't finish yet (finished_at=null)
+def started_before_current_bucket_and_didnt_finish_yet(start_bucket_interval):
+    url = base_addr + TASKS_ENDPOINT + "started_at__lte=" + start_bucket_interval + "&finished_at__isnull="+str(True)
+    response = requests.get(url,auth=(username,password))
+    check_response(response)
+    return json.loads(response.text)
 
-    response_json = json.loads(response.text)
-    if response_json['count'] > 0:
-        data[query_date_time.strftime(DATETIME_FORMAT)]["3-running"] = response_json['count']
+# 3- started and finished in between the current bucket interval
+def started_and_finished_in_bucket(start_bucket_interval,end_bucket_interval):
+    url = base_addr + TASKS_ENDPOINT + "started_at__gte=" + start_bucket_interval + "&finished_at__range="+start_bucket_interval+","+end_bucket_interval
+    response = requests.get(url,auth=(username,password))
+    check_response(response)
+    return json.loads(response.text)
+
+# 4- started and not finished in between the current bucket interval
+def started_and_not_finished_in_bucket(start_bucket_interval,end_bucket_interval):
+    url = base_addr + TASKS_ENDPOINT + "started_at__gte=" + start_bucket_interval + "&finished_at__gte="+end_bucket_interval 
+    response = requests.get(url,auth=(username,password))
+    check_response(response)
+    return json.loads(response.text)
+
+# 5- started before the current bucket interval and finished in between the current bucket interval
+def started_before_current_bucket_and_finished(start_bucket_interval,end_bucket_interval):
+    url = base_addr + TASKS_ENDPOINT + "started_at__lte=" + start_bucket_interval + "&finished_at__range="+start_bucket_interval+","+end_bucket_interval
+    response = requests.get(url,auth=(username,password))
+    check_response(response)
+    return json.loads(response.text)
+
+# 6- started before the current bucket interval and not finished in between the current bucket interval
+def started_before_current_bucket_and_not_finished(start_bucket_interval,end_bucket_interval):
+    url = base_addr + TASKS_ENDPOINT + "started_at__lte=" + start_bucket_interval + "&finished_at__gte="+end_bucket_interval
+    response = requests.get(url,auth=(username,password))
+    check_response(response)
+    return json.loads(response.text)
+
+
+# 1- unblocked_at is inside of bucket, but started_at not (meaning, the task is waiting)
+def waiting_unblocked(start_bucket_interval, end_bucket_interval):
+    url = base_addr + TASKS_ENDPOINT + "unblocked_at__range=" + start_bucket_interval+","+end_bucket_interval
+    response = requests.get(url,auth=(username,password))
+    check_response(response)
+    return json.loads(response.text)
 
 
 def run():
-
     datetime_now = datetime.now() + timedelta(hours=3)
-    query_date_time = datetime_now - timedelta(hours=period_in_hours)
-    start_date = query_date_time.strftime(DATETIME_FORMAT)
-    #data = initialize_response_structure(
-    #    period_in_hours, bucket_size_in_seconds, query_date_time
-    #)
+    query_date_time = datetime_now - timedelta(minutes=10)
+    end_bucket_interval = query_date_time + timedelta(seconds=bucket_size_in_seconds)
     data = defaultdict(lambda: {})
 
-    total_seconds = timedelta(hours=period_in_hours).total_seconds()
-    number_of_intervals = int(total_seconds // bucket_size_in_seconds)
-
-    start_interval = query_date_time
-    # - started and finished in between the current bucket interval
-    while start_interval <= datetime_now:
-        end_interval = start_interval + timedelta(seconds=bucket_size_in_seconds)
-        #url = base_addr + TASKS_ENDPOINT + "started_at__lte=" + current_interval.strftime(DATETIME_FORMAT) + "&finished_at__gte="+current_interval.strftime(DATETIME_FORMAT)
-        url = base_addr + TASKS_ENDPOINT + "started_at__gte=" + start_interval.strftime(DATETIME_FORMAT) + "&finished_at__lte="+end_interval.strftime(DATETIME_FORMAT)
-        response = requests.get(url,auth=(username,password))
-
-        if response.status_code // 100 != 2:
-            print("ERROR:", response.status_code, response.text)
-            sys.exit(1)
-
-        response_json = json.loads(response.text)
-        if response_json['count'] > 0:
-            data[start_interval.strftime(DATETIME_FORMAT)]["1-running"] = response_json['count']
-        
-        running_task(start_interval,data)
-        
-        start_interval = end_interval
+    a1 = started_and_didnt_finish_yet(query_date_time.strftime(DATETIME_FORMAT),end_bucket_interval.strftime(DATETIME_FORMAT))
+    print(json.dumps(a1, indent=2))
+    a2 = started_before_current_bucket_and_didnt_finish_yet(query_date_time.strftime(DATETIME_FORMAT))
+    print(json.dumps(a2, indent=2))
     
-    # - started and not finished in between the current bucket interval
-    start_interval = query_date_time
-    while start_interval <= datetime_now:
-        end_interval = start_interval + timedelta(seconds=bucket_size_in_seconds)
-        #url = base_addr + TASKS_ENDPOINT + "started_at__gte=" + start_interval.strftime(DATETIME_FORMAT) + "&finished_at__lte="+datetime_now.strftime(DATETIME_FORMAT)
-        url = base_addr + TASKS_ENDPOINT + "started_at__lte=" + start_interval.strftime(DATETIME_FORMAT) + "&finished_at__lte="+datetime_now.strftime(DATETIME_FORMAT)
-        response = requests.get(url,auth=(username,password))
+    a3 = started_and_finished_in_bucket(query_date_time.strftime(DATETIME_FORMAT),end_bucket_interval.strftime(DATETIME_FORMAT))
+    a3 = json.dumps(a3,indent=2)
+    print(a3)
+    print(json.loads(a3)['count'])
 
-        if response.status_code // 100 != 2:
-            print("ERROR:", response.status_code, response.text)
-            sys.exit(1)
+    a4 = started_and_not_finished_in_bucket(query_date_time.strftime(DATETIME_FORMAT),end_bucket_interval.strftime(DATETIME_FORMAT))
+    print(json.dumps(a4, indent=2))
 
-        response_json = json.loads(response.text)
-        if response_json['count'] > 0:
-            data[start_interval.strftime(DATETIME_FORMAT)]["2-running"] = response_json['count']
-        start_interval = end_interval
-
-    """
-    # - started and didn't finish yet (finished_at=null)
-    url = base_addr + TASKS_ENDPOINT + "state=running&started_at__gte="+query_date_time.strftime(DATETIME_FORMAT)
-    response = requests.get(url,auth=(username,password))
-
-    if response.status_code // 100 != 2:
-        print("ERROR:", response.status_code, response.text)
-        sys.exit(1)
-
-    response_json = json.loads(response.text)
-    if response_json['count'] > 0:
-        data[query_date_time.strftime(DATETIME_FORMAT)]["3-running"] = response_json['count']
-    """
-
-    print(json.dumps(data, indent=2))
+    a5 = started_before_current_bucket_and_finished(query_date_time.strftime(DATETIME_FORMAT),end_bucket_interval.strftime(DATETIME_FORMAT))
+    print(json.dumps(a5, indent=2))
 
 
 def write_to_file(data):
@@ -282,5 +281,10 @@ def tasks_in_waiting_state_and_unblocked_url(unblocked_null):
         + str(unblocked_null)
     )
 
+
+def check_response(response):
+    if response.status_code // 100 != 2:
+        print("ERROR:", response.status_code, response.text)
+        sys.exit(1)
 
 run()
