@@ -6,9 +6,12 @@ from pulpcore.app.serializers import (
     GetOrCreateSerializerMixin,
     ModelSerializer,
 )
-
-from pulp_service.app.models import FeatureContentGuard, ArtifactVulnerability
+from pulpcore.app.viewsets import NamedModelViewSet
 from pulpcore.app.viewsets.custom_filters import RepoVersionHrefPrnFilter
+
+from pulp_file.app.models import FileContent
+from pulp_file.app.viewsets import FileContentFilter
+from pulp_service.app.models import FeatureContentGuard, ArtifactVulnerability
 
 
 class FeatureContentGuardSerializer(ContentGuardSerializer, GetOrCreateSerializerMixin):
@@ -52,3 +55,21 @@ class ContentScanSerializer(serializers.Serializer):
         except:
             raise serializers.ValidationError(_("No matching model instance found."))
         return repo_version.pk
+
+class TMPNPMScanSerializer(serializers.Serializer):
+    """
+    A serializer for npm dependencies package scan.
+    """
+
+    package_json = serializers.FileField(
+        help_text=_("An uploaded npm package.json file to scan the dependencies."),
+        required=False,
+    )
+
+    def validate(self, data):
+        data = super().validate(data)
+        try:
+            file = NamedModelViewSet.get_resource(data["package_json"], FileContent)
+        except:
+            raise serializers.ValidationError("No matching model instance found.")
+        return file.pk

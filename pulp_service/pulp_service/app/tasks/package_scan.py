@@ -4,7 +4,7 @@ import json
 
 from asgiref.sync import sync_to_async
 
-from pulpcore.app.models import Content, RepositoryVersion
+from pulpcore.app.models import Content, ContentArtifact, RepositoryVersion
 from pulp_rpm.app.models.package import Package as RPMPackage
 from pulp_npm.app.models import Package as NPMPackage
 
@@ -19,15 +19,18 @@ _logger = logging.getLogger(__name__)
 cache_rh_cpe = {}
 
 
-async def check_content(repo_version_pk):
+async def check_content(repo_version_pk=None, npm_package=None):
     """
     Get the list of contents from reop_version, build a package_list and makes an API request to
     osv.dev using this package_list
     """
-    contents = await sync_to_async(_get_content_from_repo)(repo_version_pk)
-    osv_packages = await sync_to_async(_define_osv_package_list)(contents)
-    if not osv_packages:
-        return
+    if repo_version_pk:
+        contents = await sync_to_async(_get_content_from_repo)(repo_version_pk)
+        osv_packages = await sync_to_async(_define_osv_package_list)(contents)
+        if not osv_packages:
+            return
+    elif npm_package:
+
     await _scan_packages(osv_packages)
 
 
@@ -61,16 +64,16 @@ def _get_content_from_repo(repo_version_pk: str) -> list[any]:
     return Content.objects.filter(pk__in=repo_version.content)
 
 
-def _define_osv_package_list(content_types: list[any]) -> list[dict]:
+def _define_osv_package_list(content_units: list[any]) -> list[dict]:
     """
     Build a list of dictionaries from contents following the osv.dev expected format:
     { "package": {"name": "<package name>", "ecosystem": "<ecosystem>" }, "version": "<version>" }
     """
-    if not content_types:
+    if not content_units:
         return
 
     package_list = []
-    for content in content_types:
+    for content in content_units:
         content = content.cast()
         ecosystem = _identify_package_ecosystem(content)
         if not ecosystem:
@@ -109,3 +112,12 @@ async def _identify_rh_cpe():
             cache_rh_cpe = json_body["data"]
             _logger.info(f"RESPONSE JSON: {json.dumps(cache_rh_cpe, indent=2)}")
             # return json_body
+
+
+def parse_dependencies(content_id):
+    content_artifact = ContentArtifact.objects.get(content=content_id)
+    artifact_file = content_artifact.artifact.file.name
+    with open(artifact_file, 'r') as file:
+        package_json = json.load(file)
+    return package_json.get("dependencies",None)
+

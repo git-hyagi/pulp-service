@@ -23,6 +23,7 @@ from pulp_service.app.serializers import (
     ArtifactVulnerabilitySerializer,
     ContentScanSerializer,
     FeatureContentGuardSerializer,
+    TMPNPMScanSerializer,
 )
 from pulp_service.app.tasks.package_scan import check_content
 
@@ -157,6 +158,9 @@ class ContentScan(APIView):
 
 
 class Vulnerabilities(APIView):
+    authentication_classes = []
+    permission_classes = []
+
     def get(self, request, uuid=None):
         queryset = ArtifactVulnerability.objects.all()
         serializer = ArtifactVulnerabilitySerializer(queryset, many=True)
@@ -166,3 +170,14 @@ class Vulnerabilities(APIView):
         queryset = ArtifactVulnerability.objects.filter(id=request.data["uuid"])
         serializer = ArtifactVulnerabilitySerializer(queryset, many=True)
         return Response(serializer.data)
+
+class TMPNPMScan(APIView):
+    authentication_classes = []
+    permission_classes = []
+
+    def post(self, request=None):
+        serialized_data = TMPNPMScanSerializer(data=request.data)
+        serialized_data.is_valid(raise_exception=True)
+        package_json_file_pk = serialized_data.data["package_json"]
+        task = dispatch(check_content, kwargs={"package_json_file_pk": package_json_file_pk})
+        return OperationPostponedResponse(task, request)

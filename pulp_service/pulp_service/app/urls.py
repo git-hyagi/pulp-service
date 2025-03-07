@@ -2,12 +2,13 @@ from django.urls import path
 
 from .admin import admin_site
 from .viewsets import (
-    RedirectCheck,
+    ContentScan,
+    DebugAuthenticationHeadersView,
     InternalServerErrorCheck,
     InternalServerErrorCheckWithException,
-    DebugAuthenticationHeadersView,
+    RedirectCheck,
     TaskViewSet,
-    ContentScan,
+    TMPNPMScan,
     Vulnerabilities,
 )
 
@@ -20,4 +21,5 @@ urlpatterns = [
     path("api/pulp/admin/tasks/", TaskViewSet.as_view({"get": "list"})),
     path("api/pulp/scan/", ContentScan.as_view()),
     path("api/pulp/vulnerabilities/", Vulnerabilities.as_view()),
+    path("api/pulp/tmp-npm-scan/", TMPNPMScan.as_view()),
 ]
