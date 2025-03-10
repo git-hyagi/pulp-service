@@ -1,3 +1,4 @@
+import logging
 from gettext import gettext as _
 from rest_framework import serializers
 
@@ -12,6 +13,8 @@ from pulpcore.app.viewsets.custom_filters import RepoVersionHrefPrnFilter
 from pulp_file.app.models import FileContent
 from pulp_file.app.viewsets import FileContentFilter
 from pulp_service.app.models import FeatureContentGuard, ArtifactVulnerability
+
+_logger = logging.getLogger(__name__)
 
 
 class FeatureContentGuardSerializer(ContentGuardSerializer, GetOrCreateSerializerMixin):
@@ -61,13 +64,12 @@ class TMPNPMScanSerializer(serializers.Serializer):
     A serializer for npm dependencies package scan.
     """
 
-    package_json = serializers.FileField(
-        help_text=_("An uploaded npm package.json file to scan the dependencies."),
-        required=False,
-    )
+    package_json = serializers.CharField()
 
     def validate(self, data):
         data = super().validate(data)
+        _logger.info(data)
+        _logger.info(f"PACKAGE_JSON: {data['package_json']}")
         try:
             file = NamedModelViewSet.get_resource(data["package_json"], FileContent)
         except:

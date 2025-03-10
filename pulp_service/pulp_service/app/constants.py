@@ -6,3 +6,4 @@ RH_REPO_TO_CPE_URL = "https://www.redhat.com/security/data/metrics/repository-to
 PKG_ECOSYSTEM = SimpleNamespace(
     rpm="Red Hat", npm="npm", maven="Maven", python="PyPI", gem="RubyGems"
 )
+DL_FILE_CHUNK_SIZE = 1_000_000 # 1megabyte

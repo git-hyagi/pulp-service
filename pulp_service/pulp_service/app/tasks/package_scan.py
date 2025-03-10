@@ -1,6 +1,9 @@
 import aiohttp
-import logging
+import asyncio
 import json
+import logging
+import os
+import tempfile
 
 from asgiref.sync import sync_to_async
 
@@ -9,9 +12,10 @@ from pulp_rpm.app.models.package import Package as RPMPackage
 from pulp_npm.app.models import Package as NPMPackage
 
 from pulp_service.app.constants import (
-    RH_REPO_TO_CPE_URL,
-    PKG_ECOSYSTEM,
+    DL_FILE_CHUNK_SIZE,
     OSV_QUERY_URL,
+    PKG_ECOSYSTEM,
+    RH_REPO_TO_CPE_URL,
 )
 from pulp_service.app.models import ArtifactVulnerability
 
@@ -30,6 +34,7 @@ async def check_content(repo_version_pk=None, npm_package=None):
         if not osv_packages:
             return
     elif npm_package:
+        asyncio.run(parse_dependencies(npm_package))
 
     await _scan_packages(osv_packages)
 
@@ -114,10 +119,22 @@ async def _identify_rh_cpe():
             # return json_body
 
 
-def parse_dependencies(content_id):
+async def parse_dependencies(content_id):
     content_artifact = ContentArtifact.objects.get(content=content_id)
-    artifact_file = content_artifact.artifact.file.name
-    with open(artifact_file, 'r') as file:
-        package_json = json.load(file)
-    return package_json.get("dependencies",None)
 
+    with tempfile.TemporaryDirectory(dir="./tmp") as working_directory:
+        file_name = content_artifact.artifact.file.name
+        file_url = content_artifact.artifact.file.storage.url(file_name)
+        working_dir = os.path.abspath(working_directory)
+        await download_file(working_dir, file_url, 'package.json')
+        with open(working_directory+'/'+file_name, 'r') as file:
+            package_json = json.load(file)
+        _logger.info(f"##### FILE: {package_json}")
+        return package_json.get("dependencies",None)
+
+async def download_file(working_dir, file_url, file_name):
+    async with aiohttp.ClientSession() as session:
+        async with session.get(file_url) as response:
+            with open(working_dir+'/'+file_name, mode='wb') as fd:
+                async for chunk in response.content.iter_chunked(DL_FILE_CHUNK_SIZE):
+                    fd.write(chunk)
