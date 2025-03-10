@@ -131,7 +131,8 @@ async def parse_dependencies(content_id):
             package_json = json.load(file)
         _logger.info(f"##### FILE: {package_json}")
         return package_json.get("dependencies",None)
-
+    
+# use django storage interface to download the file
 async def download_file(working_dir, file_url, file_name):
     async with aiohttp.ClientSession() as session:
         async with session.get(file_url) as response:

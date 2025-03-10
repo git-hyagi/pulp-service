@@ -176,6 +176,7 @@ class TMPNPMScan(APIView):
     permission_classes = []
 
     def post(self, request=None):
+        # IT SHOULD RECEIVE A TEMPFILE
         serialized_data = TMPNPMScanSerializer(data=request.data)
         serialized_data.is_valid(raise_exception=True)
         package_json_file_pk = serialized_data.data["package_json"]
