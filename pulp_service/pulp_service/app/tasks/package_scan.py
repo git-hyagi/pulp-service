@@ -19,6 +19,25 @@ _logger = logging.getLogger(__name__)
 cache_rh_cpe = {}
 
 
+class OSVPackage:
+    """
+    OSVPackage represents the request body used in osv.dev
+    """
+
+    def __init__(self, name, version, ecosystem):
+        self.name = name
+        self.version = version
+        self.ecosystem = ecosystem
+
+    def build_osv_data(self):
+        return {
+            "osv_data": {
+                "package": {"name": self.name, "ecosystem": self.ecosystem},
+                "version": self.version,
+            },
+        }
+
+
 async def check_content(repo_version_pk=None, npm_package=None):
     """
     Get the list of contents from reop_version, build a package_list and makes an API request to
@@ -30,7 +49,7 @@ async def check_content(repo_version_pk=None, npm_package=None):
         if not osv_packages:
             return
     elif npm_package:
-        osv_packages = await sync_to_async(_parse_dependencies)(npm_package)
+        osv_packages = await sync_to_async(_parse_npm_pkg_dependencies)(npm_package)
 
     await _scan_packages(osv_packages)
 
@@ -79,14 +98,8 @@ def _define_osv_package_list(content_units: list[any]) -> list[dict]:
         ecosystem = _identify_package_ecosystem(content)
         if not ecosystem:
             break
-        package_list.append(
-            {
-                "osv_data": {
-                    "package": {"name": content.name, "ecosystem": ecosystem},
-                    "version": content.version,
-                },
-            }
-        )
+        osv_package = OSVPackage(content.name, content.version, ecosystem)
+        package_list.append(osv_package.build_osv_data())
     return package_list
 
 
@@ -114,41 +127,17 @@ async def _identify_rh_cpe():
             # return json_body
 
 
-def _parse_dependencies(content_id):
+def _parse_npm_pkg_dependencies(content_id):
     package_json_file = PulpTemporaryFile.objects.get(pk=content_id)
     data = package_json_file.file.read()
     json_data = json.loads(data)
     package_list = []
-    for pkg in json_data.get('packages', None):
-        if not json_data['packages'][pkg].get('dependencies',None):
+    for pkg in json_data.get("packages", None):
+        if not json_data["packages"][pkg].get("dependencies", None):
             continue
-        for package_name,package_version in json_data['packages'][pkg]['dependencies'].items():
-            package_list.append(
-                {
-                    "osv_data": {
-                        "package": {"name": package_name, "ecosystem": "npm"},
-                        "version": package_version,
-                    },
-                }
-            )
+        for package_name, package_version in json_data["packages"][pkg]["dependencies"].items():
+            _logger.info(f"package name: {package_name} version: {package_version}")
+            osv_package = OSVPackage(package_name, package_version, "npm")
+            package_list.append(osv_package.build_osv_data())
+    package_json_file.delete()
     return package_list
-
-    #content_artifact = ContentArtifact.objects.get(content=content_id)
-    #with tempfile.TemporaryDirectory(dir="./tmp") as working_directory:
-    #    file_name = content_artifact.artifact.file.name
-    #    file_url = content_artifact.artifact.file.storage.url(file_name)
-    #    working_dir = os.path.abspath(working_directory)
-    #    await download_file(working_dir, file_url, 'package.json')
-    #    with open(working_directory+'/'+file_name, 'r') as file:
-    #        package_json = json.load(file)
-    #    _logger.info(f"##### FILE: {package_json}")
-    #    return package_json.get("dependencies",None)
-    
-## use django storage interface to download the file
-#async def download_file(working_dir, file_url, file_name):
-#    async with aiohttp.ClientSession() as session:
-#        async with session.get(file_url) as response:
-#            with open(working_dir+'/'+file_name, mode='wb') as fd:
-#                async for chunk in response.content.iter_chunked(DL_FILE_CHUNK_SIZE):
-#                    fd.write(chunk)
-#

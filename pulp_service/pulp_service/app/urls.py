@@ -26,6 +26,5 @@ urlpatterns = [
     path("api/pulp/admin/tasks/", TaskViewSet.as_view({"get": "list"})),
     path("api/pulp/scan/", ContentScan.as_view()),
     path("api/pulp/vulnerabilities/", Vulnerabilities.as_view()),
-#    path("api/pulp/tmp-npm-scan/", TMPNPMScan),
     path("", include(router.urls)),
 ]

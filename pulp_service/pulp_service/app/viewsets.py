@@ -17,6 +17,7 @@ from rest_framework.views import APIView
 from pulpcore.plugin.models import PulpTemporaryFile
 from pulpcore.app.response import OperationPostponedResponse
 from pulpcore.app.viewsets import ContentGuardViewSet, RolesMixin, TaskViewSet
+from pulpcore.plugin.serializers import AsyncOperationResponseSerializer
 from pulpcore.plugin.tasking import dispatch
 from pulpcore.plugin.viewsets import ContentViewSet
 from pulpcore.plugin.viewsets.content import DefaultDeferredContextMixin
@@ -170,52 +171,27 @@ class Vulnerabilities(APIView):
         serializer = ArtifactVulnerabilitySerializer(queryset, many=True)
         return Response(serializer.data)
 
-    def post(self,request):
+    def post(self, request):
         queryset = ArtifactVulnerability.objects.filter(id=request.data["uuid"])
         serializer = ArtifactVulnerabilitySerializer(queryset, many=True)
         return Response(serializer.data)
 
-#class TMPNPMScan(APIView):
-#    authentication_classes = []
-#    permission_classes = []
-#
-#    def post(self, request=None):
-#        # IT SHOULD RECEIVE A TEMPFILE
-#        serialized_data = TMPNPMScanSerializer(data=request.data)
-#        serialized_data.is_valid(raise_exception=True)
-#        package_json_file_pk = serialized_data.data["package_json"]
-#        task = dispatch(check_content, kwargs={"package_json_file_pk": package_json_file_pk})
-#        return OperationPostponedResponse(task, request)
 
 class TMPNPMScan(DefaultDeferredContextMixin, ContentViewSet):
     """A ViewSet for uploads that do not require to store an uploaded content as an Artifact."""
 
     @extend_schema(
-        #description="Trigger an asynchronous task to create content,"
-        #"optionally create new repository version.",
-        #responses={202: AsyncOperationResponseSerializer},
+        description="Trigger an asynchronous task to scan the dependencies of a package"
+        "passed as a package-lock.json file",
+        responses={202: AsyncOperationResponseSerializer},
     )
     def create(self, request):
-        """Create a content unit."""
-        serializer = TMPNPMScanSerializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
-        _logger.info(f"ERRORS: {serializer.errors}")
-
-        task_payload = {k: v for k, v in request.data.items()}
-
-        file_content = task_payload.pop("package_json", None)
+        """Dispatch a task to scan the npm dependencies' vulnerabilities"""
+        serialized_data = TMPNPMScanSerializer(data=request.data)
+        serialized_data.is_valid(raise_exception=True)
+        file_content = request.data["package_json"]
         temp_file = PulpTemporaryFile.init_and_validate(file_content)
         temp_file.save()
 
-        exclusive_resources = [
-            item for item in (serializer.validated_data.get(key) for key in ("repository",)) if item
-        ]
-
-        #context = self.get_deferred_context(request)
-        #context["pulp_temp_file_pk"] = str(temp_file.pk)
-        task = dispatch(
-            check_content,
-            exclusive_resources=exclusive_resources,
-            kwargs={"npm_package": str(temp_file.pk)},
-        )
+        task = dispatch(check_content, kwargs={"npm_package": str(temp_file.pk)})
         return OperationPostponedResponse(task, request)
