@@ -1,18 +1,14 @@
 import aiohttp
-import asyncio
 import json
 import logging
-import os
-import tempfile
 
 from asgiref.sync import sync_to_async
 
-from pulpcore.app.models import Content, ContentArtifact, RepositoryVersion
+from pulpcore.app.models import Content, RepositoryVersion, PulpTemporaryFile
 from pulp_rpm.app.models.package import Package as RPMPackage
 from pulp_npm.app.models import Package as NPMPackage
 
 from pulp_service.app.constants import (
-    DL_FILE_CHUNK_SIZE,
     OSV_QUERY_URL,
     PKG_ECOSYSTEM,
     RH_REPO_TO_CPE_URL,
@@ -34,7 +30,7 @@ async def check_content(repo_version_pk=None, npm_package=None):
         if not osv_packages:
             return
     elif npm_package:
-        asyncio.run(parse_dependencies(npm_package))
+        osv_packages = await sync_to_async(_parse_dependencies)(npm_package)
 
     await _scan_packages(osv_packages)
 
@@ -89,7 +85,6 @@ def _define_osv_package_list(content_units: list[any]) -> list[dict]:
                     "package": {"name": content.name, "ecosystem": ecosystem},
                     "version": content.version,
                 },
-                "content": content,
             }
         )
     return package_list
@@ -119,23 +114,41 @@ async def _identify_rh_cpe():
             # return json_body
 
 
-async def parse_dependencies(content_id):
-    content_artifact = ContentArtifact.objects.get(content=content_id)
+def _parse_dependencies(content_id):
+    package_json_file = PulpTemporaryFile.objects.get(pk=content_id)
+    data = package_json_file.file.read()
+    json_data = json.loads(data)
+    package_list = []
+    for pkg in json_data.get('packages', None):
+        if not json_data['packages'][pkg].get('dependencies',None):
+            continue
+        for package_name,package_version in json_data['packages'][pkg]['dependencies'].items():
+            package_list.append(
+                {
+                    "osv_data": {
+                        "package": {"name": package_name, "ecosystem": "npm"},
+                        "version": package_version,
+                    },
+                }
+            )
+    return package_list
 
-    with tempfile.TemporaryDirectory(dir="./tmp") as working_directory:
-        file_name = content_artifact.artifact.file.name
-        file_url = content_artifact.artifact.file.storage.url(file_name)
-        working_dir = os.path.abspath(working_directory)
-        await download_file(working_dir, file_url, 'package.json')
-        with open(working_directory+'/'+file_name, 'r') as file:
-            package_json = json.load(file)
-        _logger.info(f"##### FILE: {package_json}")
-        return package_json.get("dependencies",None)
+    #content_artifact = ContentArtifact.objects.get(content=content_id)
+    #with tempfile.TemporaryDirectory(dir="./tmp") as working_directory:
+    #    file_name = content_artifact.artifact.file.name
+    #    file_url = content_artifact.artifact.file.storage.url(file_name)
+    #    working_dir = os.path.abspath(working_directory)
+    #    await download_file(working_dir, file_url, 'package.json')
+    #    with open(working_directory+'/'+file_name, 'r') as file:
+    #        package_json = json.load(file)
+    #    _logger.info(f"##### FILE: {package_json}")
+    #    return package_json.get("dependencies",None)
     
-# use django storage interface to download the file
-async def download_file(working_dir, file_url, file_name):
-    async with aiohttp.ClientSession() as session:
-        async with session.get(file_url) as response:
-            with open(working_dir+'/'+file_name, mode='wb') as fd:
-                async for chunk in response.content.iter_chunked(DL_FILE_CHUNK_SIZE):
-                    fd.write(chunk)
+## use django storage interface to download the file
+#async def download_file(working_dir, file_url, file_name):
+#    async with aiohttp.ClientSession() as session:
+#        async with session.get(file_url) as response:
+#            with open(working_dir+'/'+file_name, mode='wb') as fd:
+#                async for chunk in response.content.iter_chunked(DL_FILE_CHUNK_SIZE):
+#                    fd.write(chunk)
+#

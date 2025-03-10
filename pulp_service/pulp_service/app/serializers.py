@@ -64,14 +64,16 @@ class TMPNPMScanSerializer(serializers.Serializer):
     A serializer for npm dependencies package scan.
     """
 
-    package_json = serializers.CharField()
+    #package_json = serializers.CharField()
+    package_json = serializers.FileField()
+    #def validate(self, data):
+    #    data = super().validate(data)
+    #    _logger.info(f"data: {data}")
 
-    def validate(self, data):
-        data = super().validate(data)
-        _logger.info(data)
-        _logger.info(f"PACKAGE_JSON: {data['package_json']}")
-        try:
-            file = NamedModelViewSet.get_resource(data["package_json"], FileContent)
-        except:
-            raise serializers.ValidationError("No matching model instance found.")
-        return file.pk
+    #def validate(self, data):
+    #    data = super().validate(data)
+    #    try:
+    #        file = NamedModelViewSet.get_resource(data["package_json"], FileContent)
+    #    except:
+    #        raise serializers.ValidationError("No matching model instance found.")
+    #    return file.pk
