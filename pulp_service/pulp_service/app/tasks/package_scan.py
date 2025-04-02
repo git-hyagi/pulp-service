@@ -1,5 +1,6 @@
 import aiohttp
 import json
+import re
 import threading
 
 from asgiref.sync import sync_to_async
@@ -9,8 +10,9 @@ from pulpcore.plugin.util import get_domain
 from pulpcore.plugin.models import CreatedResource, RepositoryVersion, PulpTemporaryFile
 from pulp_npm.app.models import Package as NPMPackage
 from pulp_service.app.constants import (
-    PKG_ECOSYSTEM,
     OSV_QUERY_URL,
+    PKG_ECOSYSTEM,
+    RH_REPO_TO_CPE_URL,
     VULNERABILITY_TASK_THREAD_TIMEOUT,
 )
 from pulp_service.app.models import VulnerabilityReport
@@ -18,6 +20,9 @@ from pulp_service.app.tasks.util import except_catch_and_raise
 
 # Create a thread-safe queue to share Content units between threads
 content_queue = Queue()
+
+# Cache the results from repository-to-CPE mapping data
+cached_rpm_cpes = None
 
 
 async def check_content_from_repo_version(repo_version_pk):
@@ -105,9 +110,10 @@ def _get_content_from_repo_version(repo_version_pk: str):
     repo_version = RepositoryVersion.objects.get(pk=repo_version_pk)
     for content_unit in repo_version.content:
         content = content_unit.cast()
-        ecosystem = _identify_package_ecosystem(content)
-        osv_data = _build_osv_data(content.name, ecosystem, content.version)
-        content_queue.put(osv_data)
+        ecosystems = _identify_package_ecosystem(content)
+        for ecosystem in ecosystems:
+            osv_data = _build_osv_data(content.name, ecosystem, content.version)
+            content_queue.put(osv_data)
     content_queue.put(None)  # signal that there is no more content_units
 
 
@@ -155,8 +161,34 @@ def _identify_package_ecosystem(content: any) -> str:
     Returns an osv.dev ecosystem (string) based on the content_type
     """
     if isinstance(content, NPMPackage):
-        return getattr(PKG_ECOSYSTEM, "npm", None)
+        return [getattr(PKG_ECOSYSTEM, "npm", None)]
     elif content.TYPE in ["python", "gem"]:
-        return getattr(PKG_ECOSYSTEM, content.TYPE, None)
+        return [getattr(PKG_ECOSYSTEM, content.TYPE, None)]
+    elif content.TYPE == "rpm":
+        return _identify_rhel_repo_cpe(content)
     else:
         raise RuntimeError("Package type not supported!")
+
+
+async def _get_repository_to_CPE_mapping():
+    async with aiohttp.ClientSession() as session:
+        async with session.get(RH_REPO_TO_CPE_URL) as resp:
+            if not (200<=resp.status<=299):
+                raise RuntimeError(f"[{resp.status}] Failed to make a request to Red Hat CPE endpoint.")
+            response_body = await resp.text()
+            cached_rpm_cpes = json.loads(response_body)
+
+
+async def _identify_rhel_repo_cpe(repo):
+    cpe_prefix = r"^cpe:\/[oa]:redhat"
+    #cpe = "cpe:/a:redhat:a_mq_clients:1::el5"
+    #result = re.sub(cpe_prefix, PKG_ECOSYSTEM.rpm, cpe, flags=re.IGNORECASE)
+    cpes = []
+
+    if not cached_rpm_cpes:
+        await _get_repository_to_CPE_mapping()
+
+    if cached_rpm_cpes['data'].get(repo):
+        for cpe in cached_rpm_cpes['data'][repo]['cpes']:
+            cpes.append(re.sub(cpe_prefix, PKG_ECOSYSTEM.rpm, cpe, flags=re.IGNORECASE))
+    return cpes
