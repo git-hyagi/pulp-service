@@ -10,6 +10,7 @@ from base64 import b64decode
 from binascii import Error as Base64DecodeError
 from hashlib import sha256
 from gettext import gettext as _
+from uuid6 import uuid7
 
 from django.conf import settings
 from django.db import models
@@ -177,8 +178,19 @@ class VulnerabilityReport(BaseModel):
     Model used in vulnerability report.
     """
 
+    pulp_id = models.UUIDField(default=uuid7, editable=False, unique=True)
+    content = models.OneToOneField(
+        "core.Content",
+        on_delete=models.CASCADE,
+        primary_key=True,
+        default=uuid7,
+    )
     vulns = models.JSONField()
     pulp_domain = models.ForeignKey("core.Domain", default=get_domain_pk, on_delete=models.CASCADE)
+    repo_versions = models.ManyToManyField("core.RepositoryVersion", blank=True)
 
     class Meta:
         default_related_name = "%(app_label)s_%(model_name)s"
+
+
+

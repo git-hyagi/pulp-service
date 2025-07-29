@@ -1,4 +1,5 @@
 import aiohttp
+import asyncio
 import json
 import re
 import threading
@@ -20,7 +21,7 @@ from pulp_service.app.models import VulnerabilityReport
 from pulp_service.app.tasks.util import except_catch_and_raise
 
 # Create a thread-safe queue to share Content units between threads
-content_queue = Queue()
+#content_queue = Queue()
 
 # CPE prefix from Red Hat packages
 cpe_prefix = re.compile(r"^cpe:\/[oa]:redhat")
@@ -31,11 +32,14 @@ async def check_content_from_repo_version(repo_version_pk):
     Spawn a thread to retrieve the list of packages in RepoVersion(repo_version_pk) and
     make a request to osv.dev API to check the vulnerabilities.
     """
+    task = asyncio.create_task(_get_content_from_repo_version(repo_version_pk))
+    contents = await asyncio.gather(task)
+    await _scan_packages(contents[0])
     # create a thread to collect the Contents from RepositoryVersion
-    background_thread = threading.Thread(
-        target=_get_content_from_repo_version, args=(repo_version_pk,)
-    )
-    await _start_thread_and_run_scan(background_thread)
+    #background_thread = threading.Thread(
+    #    target=_get_content_from_repo_version, args=(repo_version_pk,)
+    #)
+    #await _start_thread_and_run_scan(background_thread)
 
 
 async def check_npm_package(npm_package):
@@ -43,9 +47,10 @@ async def check_npm_package(npm_package):
     Spawn a thread to parse the package-json.lock file and make a request to osv.dev API
     with each dependency found.
     """
+    return 
     # create a thread to collect the Contents from package-lock.json file
-    background_thread = threading.Thread(target=_parse_npm_pkg_dependencies, args=(npm_package,))
-    await _start_thread_and_run_scan(background_thread)
+    #background_thread = threading.Thread(target=_parse_npm_pkg_dependencies, args=(npm_package,))
+    #await _start_thread_and_run_scan(background_thread)
 
 
 async def _start_thread_and_run_scan(background_thread):
@@ -58,22 +63,27 @@ async def _start_thread_and_run_scan(background_thread):
     background_thread.join()
 
 
-async def _scan_packages(background_thread):
+#async def _scan_packages(background_thread):
+async def _scan_packages(contents):
     """
     Makes a request to the osv.dev API and store the results in VulnerabilityReport model.
     """
     scanned_packages = {}
     async with aiohttp.ClientSession() as session:
         try:
-            for osv_data in iter(
-                lambda: content_queue.get(timeout=VULNERABILITY_TASK_THREAD_TIMEOUT), None
-            ):
-                if isinstance(osv_data, Exception):
-                    raise RuntimeError(f"Background vuln report task failed to execute: {osv_data}")
-                data = json.dumps(osv_data)
-                async with session.post(url=OSV_QUERY_URL, data=data) as response:
-                    response_body = await response.text()
-                    json_body = json.loads(response_body)
+            #for osv_data in iter(
+            #    lambda: content_queue.get(timeout=VULNERABILITY_TASK_THREAD_TIMEOUT), None
+            #):
+            for osv_data in contents:
+                #if isinstance(osv_data, Exception):
+                #    raise RuntimeError(f"Background vuln report task failed to execute: {osv_data}")
+                #data = json.dumps(osv_data)
+                repo_version = osv_data.pop("repo_version", None)
+                content = osv_data.pop("content")
+                async with session.post(url=OSV_QUERY_URL, json=osv_data) as response:
+                    #response_body = await response.text()
+                    #json_body = json.loads(response_body)
+                    json_body = await response.json()
                     osv_package_name = osv_data["package"]["name"]
                     osv_package_version = osv_data["version"]
                     package_name = "{package}-{version}".format(
@@ -83,66 +93,79 @@ async def _scan_packages(background_thread):
                     if json_body.get("vulns"):
                         scanned_packages[package_name] = json_body["vulns"]
                     if next_page_token := json_body.get("next_page_token"):
-                        next_page_request = _build_osv_data(
-                            osv_package_name,
-                            osv_data["package"]["ecosystem"],
-                            osv_package_version,
-                            next_page_token,
-                        )
-                        content_queue.put(next_page_request)
-        except Empty:
-            if not background_thread.is_alive():
-                raise RuntimeError("Vuln report task thread died unexpectedly.")
-            else:
-                raise RuntimeError("Background vuln report thread took too long.")
+                        osv_data["page_token"] = next_page_token
+                        osv_data["repo_version"] = repo_version
+                        #content_queue.put(osv_data)
+                    
+                    vuln_report, created = await sync_to_async(VulnerabilityReport.objects.update_or_create)(
+                        vulns=scanned_packages, pulp_domain=get_domain(), content=content
+                    )
+                    await sync_to_async(vuln_report.repo_versions.set)([repo_version])
+                    if created:
+                        await CreatedResource.objects.acreate(content_object=vuln_report)
 
-    vuln_report, created = await sync_to_async(VulnerabilityReport.objects.get_or_create)(
-        vulns=scanned_packages, pulp_domain=get_domain()
-    )
-    if created:
-        await CreatedResource.objects.acreate(content_object=vuln_report)
+        except:
+            raise RuntimeError("Background vuln report thread took too long.")
+        #except Empty:
+        #    if not background_thread.is_alive():
+        #        raise RuntimeError("Vuln report task thread died unexpectedly.")
+        #    else:
+        #        raise RuntimeError("Background vuln report thread took too long.")
+
+    # Set the many-to-many relationship after creation/retrieval
+    
 
 
-@except_catch_and_raise(content_queue)
-def _get_content_from_repo_version(repo_version_pk: str):
+#@except_catch_and_raise(content_queue)
+#def _get_content_from_repo_version(repo_version_pk: str):
+async def _get_content_from_repo_version(repo_version_pk: str):
     """
     Populate content_queue Queue with the content_units found in RepositoryVersion
     """
-    repo_version = RepositoryVersion.objects.get(pk=repo_version_pk)
-    for content_unit in repo_version.content:
-        content = content_unit.cast()
-        ecosystems = _identify_package_ecosystem(content, repo_version.repository)
+    osv_data_list = []
+    repo_version = await sync_to_async(RepositoryVersion.objects.get)(pk=repo_version_pk)
+    repository = await sync_to_async(lambda: repo_version.repository)()
+    content_units = await sync_to_async(list)(repo_version.content.all())
+    
+    for content_unit in content_units:
+        content = await sync_to_async(content_unit.cast)()
+        content_name = await sync_to_async(lambda: content.name)()
+        content_version = await sync_to_async(lambda: content.version)()
+        ecosystems = await sync_to_async(_identify_package_ecosystem)(content, repository)
         for ecosystem in ecosystems:
-            osv_data = _build_osv_data(content.name, ecosystem, content.version)
-            content_queue.put(osv_data)
-    content_queue.put(None)  # signal that there is no more content_units
+            osv_data = _build_osv_data(content_name, ecosystem, content_version)
+            osv_data["repo_version"] = repo_version
+            osv_data["content"] = content
+            osv_data_list.append(osv_data)
+    return osv_data_list
+    #content_queue.put(None)  # signal that there is no more content_units
 
 
-@except_catch_and_raise(content_queue)
-def _parse_npm_pkg_dependencies(package_lock_content):
-    """
-    Parse the package-lock.json file to extract the packages[name][dependencies] and
-    add them to content_queue Queue
-
-    notes:
-    - we are striping the "~" and "^" from versions because osv.dev has no support to version range
-    - the old/legacy packages[dependencies] field is not supported
-    """
-    temp_file = PulpTemporaryFile.objects.get(pk=package_lock_content)
-    package_lock_content = json.loads(temp_file.file.read())
-    temp_file.delete()
-    for pkg in package_lock_content.get("packages", None):
-        if not package_lock_content["packages"][pkg].get("dependencies", None):
-            continue
-        for package_name, package_version in package_lock_content["packages"][pkg][
-            "dependencies"
-        ].items():
-            # we will not handle version range yet, for now, we will consider
-            # only the specific version
-            package_version = package_version.strip("^~")
-            osv_data = _build_osv_data(package_name, PKG_ECOSYSTEM.npm, package_version)
-            content_queue.put(osv_data)
-    content_queue.put(None)  # signal that there is no more content_units
+#@except_catch_and_raise(content_queue)
+#def _parse_npm_pkg_dependencies(package_lock_content):
+#    """
+#    Parse the package-lock.json file to extract the packages[name][dependencies] and
+#    add them to content_queue Queue
+#
+#    notes:
+#    - we are striping the "~" and "^" from versions because osv.dev has no support to version range
+#    - the old/legacy packages[dependencies] field is not supported
+#    """
+#    temp_file = PulpTemporaryFile.objects.get(pk=package_lock_content)
+#    package_lock_content = json.loads(temp_file.file.read())
+#    temp_file.delete()
+#    for pkg in package_lock_content.get("packages", None):
+#        if not package_lock_content["packages"][pkg].get("dependencies", None):
+#            continue
+#        for package_name, package_version in package_lock_content["packages"][pkg][
+#            "dependencies"
+#        ].items():
+#            # we will not handle version range yet, for now, we will consider
+#            # only the specific version
+#            package_version = package_version.strip("^~")
+#            osv_data = _build_osv_data(package_name, PKG_ECOSYSTEM.npm, package_version)
+#            content_queue.put(osv_data)
+#    content_queue.put(None)  # signal that there is no more content_units
 
 
 def _build_osv_data(name, ecosystem, version=None, next_page_token=None):
@@ -157,7 +180,7 @@ def _build_osv_data(name, ecosystem, version=None, next_page_token=None):
     return osv_data
 
 
-def _identify_package_ecosystem(content: any, repository=None) -> str:
+def _identify_package_ecosystem(content, repository=None):
     """
     Returns an osv.dev ecosystem (string) based on the content_type
     """

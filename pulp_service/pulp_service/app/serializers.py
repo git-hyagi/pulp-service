@@ -16,8 +16,8 @@ from pulpcore.plugin.serializers import (
     ModelSerializer,
     ValidateFieldsMixin,
 )
-from pulpcore.plugin.models import Artifact, PulpTemporaryFile
-from pulpcore.plugin.serializers import ArtifactSerializer, IdentityField, RepositoryVersionRelatedField
+from pulpcore.plugin.models import Artifact, Content, PulpTemporaryFile, RepositoryVersion
+from pulpcore.plugin.serializers import ArtifactSerializer, DetailRelatedField, IdentityField, RepositoryVersionRelatedField
 from pulpcore.app.util import get_domain_pk
 
 from pulp_rpm.app.models import Package
@@ -58,10 +58,25 @@ class VulnerabilityReportSerializer(ModelSerializer):
 
     vulns = serializers.JSONField()
     pulp_href = IdentityField(view_name="vuln_report-detail")
+    repo_versions = DetailRelatedField(
+        many=True,
+        required=False,
+        allow_null=True,
+        help_text=_("RepositoryVersion HREF with the packages to be checked."),
+        queryset=RepositoryVersion.objects.all(),
+        view_name="RepositoryVersion",
+    )
+    content = DetailRelatedField(
+        many=False,
+        required=False,
+        help_text="Content HREF to be checked.",
+        queryset=Content.objects.all(),
+        view_name="content",
+    )
 
     class Meta:
         model = VulnerabilityReport
-        fields = ModelSerializer.Meta.fields + ("vulns",)
+        fields = ModelSerializer.Meta.fields + ("vulns", "repo_versions", "content")
 
 
 class ContentScanSerializer(serializers.Serializer, ValidateFieldsMixin):
