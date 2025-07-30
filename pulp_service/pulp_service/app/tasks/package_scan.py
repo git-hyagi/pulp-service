@@ -68,37 +68,20 @@ async def _scan_packages(contents):
     """
     Makes a request to the osv.dev API and store the results in VulnerabilityReport model.
     """
-    scanned_packages = {}
     async with aiohttp.ClientSession() as session:
         try:
-            #for osv_data in iter(
-            #    lambda: content_queue.get(timeout=VULNERABILITY_TASK_THREAD_TIMEOUT), None
-            #):
             for osv_data in contents:
-                #if isinstance(osv_data, Exception):
-                #    raise RuntimeError(f"Background vuln report task failed to execute: {osv_data}")
-                #data = json.dumps(osv_data)
                 repo_version = osv_data.pop("repo_version", None)
                 content = osv_data.pop("content")
                 async with session.post(url=OSV_QUERY_URL, json=osv_data) as response:
-                    #response_body = await response.text()
-                    #json_body = json.loads(response_body)
                     json_body = await response.json()
-                    osv_package_name = osv_data["package"]["name"]
-                    osv_package_version = osv_data["version"]
-                    package_name = "{package}-{version}".format(
-                        package=osv_package_name,
-                        version=osv_package_version,
-                    )
-                    if json_body.get("vulns"):
-                        scanned_packages[package_name] = json_body["vulns"]
+                    vulns = json_body["vulns"] if json_body.get("vulns") else []
                     if next_page_token := json_body.get("next_page_token"):
                         osv_data["page_token"] = next_page_token
                         osv_data["repo_version"] = repo_version
-                        #content_queue.put(osv_data)
                     
                     vuln_report, created = await sync_to_async(VulnerabilityReport.objects.update_or_create)(
-                        vulns=scanned_packages, pulp_domain=get_domain(), content=content
+                        vulns=vulns, pulp_domain=get_domain(), content=content
                     )
                     await sync_to_async(vuln_report.repo_versions.set)([repo_version])
                     if created:
