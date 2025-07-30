@@ -15,9 +15,10 @@ from pulpcore.plugin.serializers import (
     GetOrCreateSerializerMixin,
     ModelSerializer,
     ValidateFieldsMixin,
+    MultipleArtifactContentSerializer,
 )
 from pulpcore.plugin.models import Artifact, Content, PulpTemporaryFile, RepositoryVersion, Repository
-from pulpcore.plugin.serializers import ArtifactSerializer, DetailRelatedField, IdentityField, RepositoryVersionRelatedField
+from pulpcore.plugin.serializers import ArtifactSerializer, DetailRelatedField, IdentityField, RepositoryVersionRelatedField, NoArtifactContentSerializer
 from pulpcore.app.util import get_domain_pk
 
 from pulp_rpm.app.models import Package
@@ -196,3 +197,26 @@ class RPMPackageSerializer(PackageSerializer):
 
         data.update(new_pkg)
         return data
+
+class TestContent(NoArtifactContentSerializer):
+    #vuln_report = DetailRelatedField(
+    #    many=False,
+    #    required=True,
+    #    write_only=False,
+    #    help_text="Vulnerability Report HREF of this content.",
+    #    queryset=VulnerabilityReport.objects.all(),
+    #    view_name="vuln_report-detail",
+    #    source="service_vulnerabilityreport"
+    #)
+    vuln_report = serializers.PrimaryKeyRelatedField(source="service_vulnerabilityreport",queryset=VulnerabilityReport.objects.all())
+    #vuln_report = VulnerabilityReportSerializer(
+    #    source="service_vulnerabilityreport",
+    #    many=False,
+    #    required=False,
+    #    read_only=True,
+    #    help_text="Vulnerability Report data for this content.",
+    #)
+
+    class Meta:
+        model = Content
+        fields = NoArtifactContentSerializer.Meta.fields + ("vuln_report",)

@@ -20,10 +20,10 @@ from rest_framework.views import APIView
 from rest_framework.mixins import DestroyModelMixin, ListModelMixin, RetrieveModelMixin
 
 from pulpcore.plugin.viewsets import OperationPostponedResponse, SingleArtifactContentUploadViewSet
-from pulpcore.plugin.viewsets import ContentGuardViewSet, NamedModelViewSet, RolesMixin, TaskViewSet, LabelsMixin
+from pulpcore.plugin.viewsets import ContentGuardViewSet, NamedModelViewSet, RolesMixin, TaskViewSet, LabelsMixin, ContentViewSet, ReadOnlyContentViewSet
 from pulpcore.plugin.serializers import AsyncOperationResponseSerializer
 from pulpcore.plugin.tasking import dispatch
-from pulpcore.app.models import Domain
+from pulpcore.app.models import Domain, Content
 from pulpcore.app.serializers import DomainSerializer
 
 from pulp_service.app.authentication import RHServiceAccountCertAuthentication
@@ -34,6 +34,7 @@ from pulp_service.app.serializers import (
     FeatureContentGuardSerializer,
     RPMPackageSerializer,
     VulnerabilityReportSerializer,
+    TestContent,
 )
 from pulp_service.app.tasks.package_scan import check_npm_package, check_content_from_repo_version
 from pulp_rpm.app.models import Package
@@ -283,3 +284,11 @@ class CreateDomainView(APIView):
         response_data = DomainSerializer(domain, context={'request': request}).data
         
         return Response(response_data, status=status.HTTP_201_CREATED)
+
+
+class TestVulnerabilityReport(ReadOnlyContentViewSet):
+    authentication_classes = []
+    permission_classes = []
+
+    queryset = Content.objects.all()
+    serializer_class = TestContent
