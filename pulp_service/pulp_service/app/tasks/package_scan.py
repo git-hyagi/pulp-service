@@ -83,7 +83,7 @@ async def _scan_packages(contents):
                     vuln_report, created = await sync_to_async(VulnerabilityReport.objects.update_or_create)(
                         vulns=vulns, pulp_domain=get_domain(), content=content
                     )
-                    await sync_to_async(vuln_report.repo_versions.set)([repo_version])
+                    await sync_to_async(vuln_report.repo_versions.add)(repo_version)
                     if created:
                         await CreatedResource.objects.acreate(content_object=vuln_report)
 
