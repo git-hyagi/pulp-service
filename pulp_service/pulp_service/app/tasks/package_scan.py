@@ -5,8 +5,10 @@ import re
 import threading
 
 from asgiref.sync import sync_to_async
+from django.conf import settings
 from queue import Empty, Queue
 
+from pulpcore.plugin.sync import sync_to_async_iterable
 from pulpcore.plugin.util import get_domain
 from pulpcore.plugin.models import CreatedResource, RepositoryVersion, PulpTemporaryFile
 from pulp_npm.app.models import Package as NPMPackage
@@ -32,14 +34,10 @@ async def check_content_from_repo_version(repo_version_pk):
     Spawn a thread to retrieve the list of packages in RepoVersion(repo_version_pk) and
     make a request to osv.dev API to check the vulnerabilities.
     """
-    task = asyncio.create_task(_get_content_from_repo_version(repo_version_pk))
-    contents = await asyncio.gather(task)
-    await _scan_packages(contents[0])
-    # create a thread to collect the Contents from RepositoryVersion
-    #background_thread = threading.Thread(
-    #    target=_get_content_from_repo_version, args=(repo_version_pk,)
-    #)
-    #await _start_thread_and_run_scan(background_thread)
+    tasks = []
+    async for contents in _get_content_from_repo_version(repo_version_pk):
+        tasks.append(asyncio.create_task(_scan_packages(contents)))
+    await asyncio.gather(*tasks)
 
 
 async def check_npm_package(npm_package):
@@ -64,39 +62,32 @@ async def _start_thread_and_run_scan(background_thread):
 
 
 #async def _scan_packages(background_thread):
-async def _scan_packages(contents):
+async def _scan_packages(osv_data):
     """
     Makes a request to the osv.dev API and store the results in VulnerabilityReport model.
     """
-    async with aiohttp.ClientSession() as session:
-        try:
-            for osv_data in contents:
-                repo_version = osv_data.pop("repo_version", None)
-                content = osv_data.pop("content")
-                async with session.post(url=OSV_QUERY_URL, json=osv_data) as response:
+    semaphore = asyncio.Semaphore(settings.VULN_REPORT_TASK_LIMITER)
+    async with semaphore:
+        async with aiohttp.ClientSession() as session:
+            repo_version = osv_data.pop("repo_version", None)
+            content = osv_data.pop("content")
+            async with session.post(url=OSV_QUERY_URL, json=osv_data) as response:
+                try:
                     json_body = await response.json()
-                    vulns = json_body["vulns"] if json_body.get("vulns") else []
-                    if next_page_token := json_body.get("next_page_token"):
-                        osv_data["page_token"] = next_page_token
-                        osv_data["repo_version"] = repo_version
-                    
-                    vuln_report, created = await sync_to_async(VulnerabilityReport.objects.update_or_create)(
-                        vulns=vulns, pulp_domain=get_domain(), content=content
-                    )
-                    await sync_to_async(vuln_report.repo_versions.add)(repo_version)
-                    if created:
-                        await CreatedResource.objects.acreate(content_object=vuln_report)
+                except aiohttp.ContentTypeError:
+                    raise RuntimeError("Vuln report task failed to query osv.dev data.")
+                vulns = json_body["vulns"] if json_body.get("vulns") else []
+                if next_page_token := json_body.get("next_page_token"):
+                    osv_data["page_token"] = next_page_token
+                    osv_data["repo_version"] = repo_version
 
-        except:
-            raise RuntimeError("Background vuln report thread took too long.")
-        #except Empty:
-        #    if not background_thread.is_alive():
-        #        raise RuntimeError("Vuln report task thread died unexpectedly.")
-        #    else:
-        #        raise RuntimeError("Background vuln report thread took too long.")
+                vuln_report, created = await sync_to_async(VulnerabilityReport.objects.update_or_create)(
+                    vulns=vulns, pulp_domain=get_domain(), content=content
+                )
+                await sync_to_async(vuln_report.repo_versions.add)(repo_version)
+                if created:
+                    await CreatedResource.objects.acreate(content_object=vuln_report)
 
-    # Set the many-to-many relationship after creation/retrieval
-    
 
 
 #@except_catch_and_raise(content_queue)
@@ -105,7 +96,6 @@ async def _get_content_from_repo_version(repo_version_pk: str):
     """
     Populate content_queue Queue with the content_units found in RepositoryVersion
     """
-    osv_data_list = []
     repo_version = await sync_to_async(RepositoryVersion.objects.get)(pk=repo_version_pk)
     repository = await sync_to_async(lambda: repo_version.repository)()
     content_units = await sync_to_async(list)(repo_version.content.all())
@@ -119,10 +109,7 @@ async def _get_content_from_repo_version(repo_version_pk: str):
             osv_data = _build_osv_data(content_name, ecosystem, content_version)
             osv_data["repo_version"] = repo_version
             osv_data["content"] = content
-            osv_data_list.append(osv_data)
-    return osv_data_list
-    #content_queue.put(None)  # signal that there is no more content_units
-
+            yield osv_data
 
 #@except_catch_and_raise(content_queue)
 #def _parse_npm_pkg_dependencies(package_lock_content):
