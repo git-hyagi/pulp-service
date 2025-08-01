@@ -20,10 +20,11 @@ from rest_framework.views import APIView
 from rest_framework.mixins import DestroyModelMixin, ListModelMixin, RetrieveModelMixin
 
 from pulpcore.plugin.viewsets import OperationPostponedResponse, SingleArtifactContentUploadViewSet
-from pulpcore.plugin.viewsets import ContentGuardViewSet, NamedModelViewSet, RolesMixin, TaskViewSet, LabelsMixin, ContentViewSet, ReadOnlyContentViewSet
+from pulpcore.plugin.viewsets import ContentGuardViewSet, NamedModelViewSet, RolesMixin, TaskViewSet, LabelsMixin
 from pulpcore.plugin.serializers import AsyncOperationResponseSerializer
 from pulpcore.plugin.tasking import dispatch
-from pulpcore.app.models import Domain, Content
+from pulpcore.app.models import Domain
+from pulpcore.plugin.models import Content, RepositoryVersion
 from pulpcore.app.serializers import DomainSerializer
 
 from pulp_service.app.authentication import RHServiceAccountCertAuthentication
@@ -35,6 +36,7 @@ from pulp_service.app.serializers import (
     RPMPackageSerializer,
     VulnerabilityReportSerializer,
     TestContent,
+    TestRepo,
 )
 from pulp_service.app.tasks.package_scan import check_npm_package, check_content_from_repo_version
 from pulp_rpm.app.models import Package
@@ -165,8 +167,12 @@ class TaskViewSet(TaskViewSet):
 class VulnerabilityReport(NamedModelViewSet, ListModelMixin, RetrieveModelMixin, DestroyModelMixin):
 
     endpoint_name = "vuln_report"
-    queryset = VulnReport.objects.all()
+    queryset = VulnReport.objects.prefetch_related('repo_versions')
     serializer_class = VulnerabilityReportSerializer
+
+    @classmethod
+    def routable(cls):
+        return True
 
     @extend_schema(
         request=ContentScanSerializer,
@@ -286,9 +292,18 @@ class CreateDomainView(APIView):
         return Response(response_data, status=status.HTTP_201_CREATED)
 
 
-class TestVulnerabilityReport(ReadOnlyContentViewSet):
+class TestVulnerabilityReport(NamedModelViewSet, ListModelMixin, RetrieveModelMixin):
     authentication_classes = []
     permission_classes = []
 
-    queryset = Content.objects.all()
+    endpoint_name = "test_vuln_report"
+    queryset = Content.objects.select_related('service_vulnerabilityreport')
     serializer_class = TestContent
+
+class TestVulnerabilityReportRepo(NamedModelViewSet, ListModelMixin, RetrieveModelMixin):
+    authentication_classes = []
+    permission_classes = []
+
+    endpoint_name = "test_vuln_report_repo"
+    queryset = RepositoryVersion.objects.prefetch_related('service_vulnerabilityreport')
+    serializer_class = TestRepo

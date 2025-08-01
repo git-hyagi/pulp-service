@@ -17,7 +17,7 @@ from django.db import models
 
 from django.contrib.postgres.fields import ArrayField
 
-from pulpcore.plugin.models import BaseModel, Domain
+from pulpcore.plugin.models import Domain, MasterModel
 from pulpcore.plugin.models import AutoAddObjPermsMixin
 from pulpcore.plugin.util import get_domain_pk
 
@@ -173,11 +173,12 @@ class FeatureContentGuard(HeaderContentGuard, AutoAddObjPermsMixin):
         )
 
 
-class VulnerabilityReport(BaseModel):
+class VulnerabilityReport(MasterModel):
     """
     Model used in vulnerability report.
     """
 
+    TYPE="service"
     pulp_id = models.UUIDField(default=uuid7, editable=False, unique=True)
     content = models.OneToOneField(
         "core.Content",
@@ -191,6 +192,3 @@ class VulnerabilityReport(BaseModel):
 
     class Meta:
         default_related_name = "%(app_label)s_%(model_name)s"
-
-
-

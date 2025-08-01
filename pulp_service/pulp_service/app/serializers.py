@@ -15,9 +15,8 @@ from pulpcore.plugin.serializers import (
     GetOrCreateSerializerMixin,
     ModelSerializer,
     ValidateFieldsMixin,
-    MultipleArtifactContentSerializer,
 )
-from pulpcore.plugin.models import Artifact, Content, PulpTemporaryFile, RepositoryVersion, Repository
+from pulpcore.plugin.models import Artifact, Content, PulpTemporaryFile, RepositoryVersion
 from pulpcore.plugin.serializers import ArtifactSerializer, DetailRelatedField, IdentityField, RepositoryVersionRelatedField, NoArtifactContentSerializer
 from pulpcore.app.util import get_domain_pk
 
@@ -59,23 +58,11 @@ class VulnerabilityReportSerializer(ModelSerializer):
 
     vulns = serializers.JSONField()
     pulp_href = IdentityField(view_name="vuln_report-detail")
-    #repo_versions = DetailRelatedField(
-    #    many=True,
-    #    required=False,
-    #    allow_null=True,
-    #    write_only=True,
-    #    help_text=_("RepositoryVersion HREF with the packages to be checked."),
-    #    queryset=RepositoryVersion.objects.all(),
-    #    view_name="versions-detail",
-    #)
-    repo_versions = serializers.PrimaryKeyRelatedField(many=True, queryset=RepositoryVersion.objects.all())
     content = DetailRelatedField(
-        many=False,
-        required=True,
-        help_text="Content HREF to be checked.",
-        queryset=Content.objects.all(),
-        view_name="content",
+        read_only=True,
+        view_name_pattern=r"content(-.*/.*)-detail",
     )
+    repo_versions = RepositoryVersionRelatedField(many=True,required=False)
 
     class Meta:
         model = VulnerabilityReport
@@ -199,24 +186,37 @@ class RPMPackageSerializer(PackageSerializer):
         return data
 
 class TestContent(NoArtifactContentSerializer):
-    #vuln_report = DetailRelatedField(
-    #    many=False,
-    #    required=True,
-    #    write_only=False,
-    #    help_text="Vulnerability Report HREF of this content.",
-    #    queryset=VulnerabilityReport.objects.all(),
-    #    view_name="vuln_report-detail",
-    #    source="service_vulnerabilityreport"
-    #)
-    vuln_report = serializers.PrimaryKeyRelatedField(source="service_vulnerabilityreport",queryset=VulnerabilityReport.objects.all())
-    #vuln_report = VulnerabilityReportSerializer(
-    #    source="service_vulnerabilityreport",
-    #    many=False,
-    #    required=False,
-    #    read_only=True,
-    #    help_text="Vulnerability Report data for this content.",
-    #)
+    service_vulnerabilityreport = DetailRelatedField(
+        read_only=True,
+        view_name="vuln_report-detail",
+    )
 
     class Meta:
         model = Content
-        fields = NoArtifactContentSerializer.Meta.fields + ("vuln_report",)
+        fields = NoArtifactContentSerializer.Meta.fields + ("service_vulnerabilityreport",)
+
+class TestRepo(ModelSerializer):
+    pulp_href = IdentityField(view_name="version-detail")
+    #vuln_report = serializers.PrimaryKeyRelatedField(
+    #    source="service_vulnerabilityreport",
+    #    read_only=True,
+    #    many=True,
+    #    #queryset = VulnerabilityReport.objects.prefetch_related('core_repositoryversion'),
+    #)
+    #vuln_report = serializers.PrimaryKeyRelatedField(
+    #    source="service_vulnerabilityreport",
+    #    read_only=True,
+    #    many=True,
+    #    #queryset = VulnerabilityReport.objects.prefetch_related('core_repositoryversion'),
+    #)
+    vuln_report = DetailRelatedField(
+        source="service_vulnerabilityreport",
+        read_only=True,
+        many=False,
+        view_name="vuln_report-detail"
+        #queryset = VulnerabilityReport.objects.prefetch_related('core_repositoryversion'),
+    )
+
+    class Meta:
+        model = RepositoryVersion
+        fields = ModelSerializer.Meta.fields + ("vuln_report",)
